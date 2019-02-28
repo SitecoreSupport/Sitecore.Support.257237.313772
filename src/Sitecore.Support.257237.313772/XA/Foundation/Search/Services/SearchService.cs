@@ -1,25 +1,27 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using Microsoft.Extensions.DependencyInjection;
-using Sitecore.ContentSearch;
-using Sitecore.ContentSearch.Linq.Utilities;
-using Sitecore.ContentSearch.Utilities;
-using Sitecore.Data;
-using Sitecore.Data.Fields;
-using Sitecore.Data.Items;
-using Sitecore.DependencyInjection;
-using Sitecore.Sites;
-using Sitecore.XA.Foundation.Abstractions;
-using Sitecore.XA.Foundation.Multisite;
-using Sitecore.XA.Foundation.Search.Extensions;
-using Sitecore.XA.Foundation.Search.Models;
-using Sitecore.XA.Foundation.SitecoreExtensions.Extensions;
-using Sitecore.XA.Foundation.SitecoreExtensions.Utils;
-
-namespace Sitecore.XA.Foundation.Search.Services
+﻿namespace Sitecore.Support.XA.Foundation.Search.Services
 {
+  using System;
+  using System.Collections.Generic;
+  using System.Linq;
+  using System.Linq.Expressions;
+  using Microsoft.Extensions.DependencyInjection;
+  using Sitecore.Abstractions;
+  using Sitecore.ContentSearch;
+  using Sitecore.ContentSearch.Linq.Utilities;
+  using Sitecore.ContentSearch.Utilities;
+  using Sitecore.Data;
+  using Sitecore.Data.Fields;
+  using Sitecore.Data.Items;
+  using Sitecore.DependencyInjection;
+  using Sitecore.Sites;
+  using Sitecore.XA.Foundation.Abstractions;
+  using Sitecore.XA.Foundation.Multisite;
+  using Sitecore.XA.Foundation.Search.Extensions;
+  using Sitecore.XA.Foundation.Search.Models;
+  using Sitecore.Support.XA.Foundation.Search.Pipelines.NormalizeSearchPhrase;
+  using Sitecore.XA.Foundation.Search.Services;
+  using Sitecore.XA.Foundation.SitecoreExtensions.Extensions;
+  using Sitecore.XA.Foundation.SitecoreExtensions.Utils;
   public class SearchService : ISearchService
   {
     protected ISearchContextService SearchContextService { get; set; }
@@ -29,6 +31,8 @@ namespace Sitecore.XA.Foundation.Search.Services
     protected IIndexResolver IndexResolver { get; set; }
     protected IContext Context { get; }
     protected IBoostingService BoostingService { get; set; }
+
+    protected BaseCorePipelineManager PipelineManager { get; set; }
     public bool IsGeolocationRequest => Context.Request.QueryString.AllKeys.Contains("g");
 
     public SearchService()
@@ -40,6 +44,7 @@ namespace Sitecore.XA.Foundation.Search.Services
       IndexResolver = ServiceLocator.ServiceProvider.GetService<IIndexResolver>();
       Context = ServiceLocator.ServiceProvider.GetService<IContext>();
       BoostingService = ServiceLocator.ServiceProvider.GetService<IBoostingService>();
+      PipelineManager = ServiceLocator.ServiceProvider.GetService<BaseCorePipelineManager>();
     }
 
     public IEnumerable<Item> Search(string query = null, string scopeId = null, string language = null, string sortOrder = null, int pageSize = 20, int offset = 0, Coordinates center = null, string site = null, string itemid = null)
@@ -65,7 +70,7 @@ namespace Sitecore.XA.Foundation.Search.Services
 
       indexName = searchIndex.Name;
 
-      IEnumerable<SearchStringModel> model = scopeItems.Select(i => i[Constants.ScopeQuery]).SelectMany(SearchStringModel.ParseDatasourceString);
+      IEnumerable<SearchStringModel> model = scopeItems.Select(i => i[Sitecore.XA.Foundation.Search.Constants.ScopeQuery]).SelectMany(SearchStringModel.ParseDatasourceString);
       model = ResolveSearchQueryTokens(contextItem, model);
 
       using (new SiteContextSwitcher(SiteContextFactory.GetSiteContext("shell")))
@@ -73,14 +78,26 @@ namespace Sitecore.XA.Foundation.Search.Services
         queryable = LinqHelper.CreateQuery<ContentPage>(searchIndex.CreateSearchContext(), model);
       }
 
+      string normalizedSearchPhrase = NormalizeSearchPhrase(query);
+
       queryable = queryable.Where(IsGeolocationRequest ? GeolocationPredicate(site) : PageOrMediaPredicate(site));
-      queryable = queryable.Where(ContentPredicate(query));
+      queryable = queryable.Where(ContentPredicate(normalizedSearchPhrase));
       queryable = queryable.Where(LanguagePredicate(language));
       queryable = queryable.Where(LatestVersionPredicate());
       queryable = queryable.ApplyFacetFilters(Context.Request.QueryString, center, site);
-      queryable = BoostingService.BoostQuery(scopeItems, query, contextItem, queryable);
+      queryable = BoostingService.BoostQuery(scopeItems, normalizedSearchPhrase, contextItem, queryable);
 
       return queryable;
+    }
+
+    protected virtual string NormalizeSearchPhrase(string phrase)
+    {
+      NormalizeSearchPhraseEventArgs pipelineArgs = new NormalizeSearchPhraseEventArgs
+      {
+        Phrase = phrase
+      };
+      PipelineManager.Run("normalizeSearchPhrase", pipelineArgs);
+      return pipelineArgs.Phrase;
     }
 
     protected virtual IEnumerable<SearchStringModel> ResolveSearchQueryTokens(Item contextItem, IEnumerable<SearchStringModel> models)
@@ -109,7 +126,7 @@ namespace Sitecore.XA.Foundation.Search.Services
       var settingsItem = MultisiteContext.GetSettingsItem(homeItem);
       if (settingsItem != null)
       {
-        MultilistField associatedContent = settingsItem.Fields[Templates._SearchCriteria.Fields.AssociatedContent];
+        MultilistField associatedContent = settingsItem.Fields[Sitecore.XA.Foundation.Search.Templates._SearchCriteria.Fields.AssociatedContent];
         if (associatedContent != null)
         {
           foreach (var id in associatedContent.TargetIDs.Select(i => i.ToSearchID()))
@@ -118,7 +135,7 @@ namespace Sitecore.XA.Foundation.Search.Services
           }
         }
 
-        MultilistField associatedMedia = settingsItem.Fields[Templates._SearchCriteria.Fields.AssociatedMedia];
+        MultilistField associatedMedia = settingsItem.Fields[Sitecore.XA.Foundation.Search.Templates._SearchCriteria.Fields.AssociatedMedia];
         if (associatedMedia != null)
         {
           foreach (var shortId in associatedMedia.GetItems().Select(i => i.ID.ToSearchID()))
@@ -145,7 +162,7 @@ namespace Sitecore.XA.Foundation.Search.Services
       var settingsItem = MultisiteContext.GetSettingsItem(homeItem);
       if (settingsItem != null)
       {
-        MultilistField associatedContent = settingsItem.Fields[Templates._SearchCriteria.Fields.AssociatedContent];
+        MultilistField associatedContent = settingsItem.Fields[Sitecore.XA.Foundation.Search.Templates._SearchCriteria.Fields.AssociatedContent];
         if (associatedContent != null)
         {
           foreach (var id in associatedContent.TargetIDs.Select(i => i.ToSearchID()))
