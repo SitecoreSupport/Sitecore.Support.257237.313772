@@ -21,7 +21,7 @@
     }
     protected virtual HashSet<string> GetEscapeCharacterSet()
     {
-      return new HashSet<string> { "+", "-", "&", "|", "!", "{", "}", "[", "]", "^", "(", ")", "~", ":", ";", "/", @"\", "?", @"""" };
+      return new HashSet<string> { "+", "-", "&", "|", "!", "{", "}", "[", "]", "^", "(", ")", "~", ":", ";", ",", "/", @"\", "?", @"""" };
     }
   }
 }
