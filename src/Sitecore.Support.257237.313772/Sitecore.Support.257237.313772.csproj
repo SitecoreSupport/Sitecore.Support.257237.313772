@@ -58,10 +58,6 @@
       <HintPath>..\packages\SC.Sitecore.Kernel.9.0.1\lib\Sitecore.Kernel.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="Sitecore.XA.Foundation.Abstractions">
-      <HintPath>..\packages\SXA90.Sitecore.XA.Foundation.Abstractions.1.6.0\lib\Sitecore.XA.Foundation.Abstractions.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
     <Reference Include="Sitecore.XA.Foundation.Common">
       <HintPath>..\packages\SXA90.Sitecore.XA.Foundation.Common.1.6.0\lib\Sitecore.XA.Foundation.Common.dll</HintPath>
       <Private>False</Private>
@@ -86,10 +82,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="XA\Foundation\Search\Pipelines\NormalizeSearchPhrase\NormalizeSearchPhraseEventArgs.cs" />
-    <Compile Include="XA\Foundation\Search\Pipelines\NormalizeSearchPhrase\NormalizeSearchPhraseProcessor.cs" />
-    <Compile Include="XA\Foundation\Search\Pipelines\NormalizeSearchPhrase\RemoveSpecialSearchCharactersProcessor.cs" />
-    <Compile Include="XA\Foundation\Search\Services\SearchService.cs" />
+    <Compile Include="RegisterSearchServices.cs" />
+    <Compile Include="SearchService.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="App_Config\Include\zzz\Sitecore.Support.257237.313772.config" />
@@ -98,6 +92,7 @@
     <None Include="packages.config" />
     <None Include="web.config" />
   </ItemGroup>
+  <ItemGroup />
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>

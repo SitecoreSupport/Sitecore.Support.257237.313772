@@ -1,27 +1,34 @@
-﻿namespace Sitecore.Support.XA.Foundation.Search.Services
+﻿// --------------------------------------------------------------------------------------------------------------------
+// <copyright file="SearchService.cs" company="Sitecore Corporation A/S">
+//     © 2017 Sitecore Corporation A/S. All rights reserved.
+// </copyright>
+// <summary>
+//     Defines the SearchService type.
+// </summary>
+// --------------------------------------------------------------------------------------------------------------------
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Linq.Expressions;
+using Microsoft.Extensions.DependencyInjection;
+using Sitecore.Abstractions;
+using Sitecore.ContentSearch;
+using Sitecore.ContentSearch.Linq.Utilities;
+using Sitecore.ContentSearch.Utilities;
+using Sitecore.Data.Fields;
+using Sitecore.Data.Items;
+using Sitecore.Data.Managers;
+using Sitecore.DependencyInjection;
+using Sitecore.XA.Foundation.Multisite;
+using Sitecore.XA.Foundation.Search.Extensions;
+using Sitecore.XA.Foundation.Search.Models;
+using Sitecore.XA.Foundation.Search.Services;
+using Sitecore.XA.Foundation.SitecoreExtensions.Extensions;
+using Sitecore.XA.Foundation.SitecoreExtensions.Utils;
+
+namespace Sitecore.Support.XA.Foundation.Search.Services
 {
-  using System;
-  using System.Collections.Generic;
-  using System.Linq;
-  using System.Linq.Expressions;
-  using Microsoft.Extensions.DependencyInjection;
-  using Sitecore.Abstractions;
-  using Sitecore.ContentSearch;
-  using Sitecore.ContentSearch.Linq.Utilities;
-  using Sitecore.ContentSearch.Utilities;
-  using Sitecore.Data;
-  using Sitecore.Data.Fields;
-  using Sitecore.Data.Items;
-  using Sitecore.DependencyInjection;
-  using Sitecore.Sites;
-  using Sitecore.XA.Foundation.Abstractions;
-  using Sitecore.XA.Foundation.Multisite;
-  using Sitecore.XA.Foundation.Search.Extensions;
-  using Sitecore.XA.Foundation.Search.Models;
-  using Sitecore.Support.XA.Foundation.Search.Pipelines.NormalizeSearchPhrase;
-  using Sitecore.XA.Foundation.Search.Services;
-  using Sitecore.XA.Foundation.SitecoreExtensions.Extensions;
-  using Sitecore.XA.Foundation.SitecoreExtensions.Utils;
   public class SearchService : ISearchService
   {
     protected ISearchContextService SearchContextService { get; set; }
@@ -29,11 +36,9 @@
     protected ISortingService SortingService { get; set; }
     protected IFacetService FacetService { get; set; }
     protected IIndexResolver IndexResolver { get; set; }
-    protected IContext Context { get; }
-    protected IBoostingService BoostingService { get; set; }
-
+    #region MODIFIED FOR PATCH 257237.313772
     protected BaseCorePipelineManager PipelineManager { get; set; }
-    public bool IsGeolocationRequest => Context.Request.QueryString.AllKeys.Contains("g");
+    #endregion
 
     public SearchService()
     {
@@ -42,15 +47,13 @@
       SortingService = ServiceLocator.ServiceProvider.GetService<ISortingService>();
       FacetService = ServiceLocator.ServiceProvider.GetService<IFacetService>();
       IndexResolver = ServiceLocator.ServiceProvider.GetService<IIndexResolver>();
-      Context = ServiceLocator.ServiceProvider.GetService<IContext>();
-      BoostingService = ServiceLocator.ServiceProvider.GetService<IBoostingService>();
-      PipelineManager = ServiceLocator.ServiceProvider.GetService<BaseCorePipelineManager>();
     }
 
-    public IEnumerable<Item> Search(string query = null, string scopeId = null, string language = null, string sortOrder = null, int pageSize = 20, int offset = 0, Coordinates center = null, string site = null, string itemid = null)
+    public IEnumerable<Item> Search(string query = null, string scopeId = null, string language = null, string sortOrder = null, int pageSize = 20, int offset = 0, Coordinates center = null, string site = null)
     {
-      IQueryable<ContentPage> contentQuery = GetQuery(query, scopeId, language, center, site, itemid);
-      contentQuery = SortingService.Order(contentQuery, sortOrder, center, site);
+      IQueryable<ContentPage> contentQuery = GetQuery(query, scopeId, language, center, site);
+      Unit unit;
+      contentQuery = SortingService.Order(contentQuery, sortOrder, center, site, out unit);
       contentQuery = contentQuery.Skip(offset);
       contentQuery = contentQuery.Take(pageSize);
 
@@ -60,57 +63,58 @@
       return items;
     }
 
-    public IQueryable<ContentPage> GetQuery(string query, string scope, string language, Coordinates center, string site, string itemid, out string indexName)
+    public bool IsGeolocationRequest => Context.Request.QueryString.AllKeys.Contains("g");
+
+    public IQueryable<ContentPage> GetQuery(string query, string scope, string language, Coordinates center, string siteName, out string indexName)
     {
-      Item contextItem = GetContextItem(itemid);
-      ISearchIndex searchIndex = IndexResolver.ResolveIndex(contextItem);
-      IList<Item> scopeItems = ItemUtils.Lookup(scope, Context.Database);
-      IProviderSearchContext searchContext = searchIndex.CreateSearchContext();
-      IQueryable<ContentPage> queryable;
+      ISearchIndex searchIndex = IndexResolver.ResolveIndex();
 
       indexName = searchIndex.Name;
-
-      IEnumerable<SearchStringModel> model = scopeItems.Select(i => i[Sitecore.XA.Foundation.Search.Constants.ScopeQuery]).SelectMany(SearchStringModel.ParseDatasourceString);
-      model = ResolveSearchQueryTokens(contextItem, model);
-
-      using (new SiteContextSwitcher(SiteContextFactory.GetSiteContext("shell")))
-      {
-        queryable = LinqHelper.CreateQuery<ContentPage>(searchIndex.CreateSearchContext(), model);
-      }
-
+      #region MODIFIED FOR PATCH 257237.313772 Full name for resolving of ScopeQuery
+      IEnumerable<SearchStringModel> model = ItemUtils.Lookup(scope, Context.Database).Select(i => i[Sitecore.XA.Foundation.Search.Constants.ScopeQuery]).SelectMany(SearchStringModel.ParseDatasourceString);
+      #endregion
+      IQueryable<ContentPage> queryable = LinqHelper.CreateQuery<ContentPage>(searchIndex.CreateSearchContext(), model);
+      #region MODIFIED FOR PATCH 257237.313772 NORMALIZING QUERY
       string normalizedSearchPhrase = NormalizeSearchPhrase(query);
-
-      queryable = queryable.Where(IsGeolocationRequest ? GeolocationPredicate(site) : PageOrMediaPredicate(site));
+      #endregion
+      queryable = queryable.Where(IsGeolocationRequest ? GeolocationPredicate(siteName) : PageOrMediaPredicate(siteName));
+      #region MODIFIED FOR PATCH 257237.313772 USING NORMALIZED QUERY
       queryable = queryable.Where(ContentPredicate(normalizedSearchPhrase));
+      #endregion
       queryable = queryable.Where(LanguagePredicate(language));
       queryable = queryable.Where(LatestVersionPredicate());
-      queryable = queryable.ApplyFacetFilters(Context.Request.QueryString, center, site);
-      queryable = BoostingService.BoostQuery(scopeItems, normalizedSearchPhrase, contextItem, queryable);
-
+      queryable = queryable.ApplyFacetFilters(Context.Request.QueryString, center, siteName);
       return queryable;
     }
-
+    #region MODIFIED FOR PATCH 257237.313772 NORMALIZE
     protected virtual string NormalizeSearchPhrase(string phrase)
     {
-      NormalizeSearchPhraseEventArgs pipelineArgs = new NormalizeSearchPhraseEventArgs
+      if (string.IsNullOrWhiteSpace(phrase))
       {
-        Phrase = phrase
-      };
-      PipelineManager.Run("normalizeSearchPhrase", pipelineArgs);
-      return pipelineArgs.Phrase;
+        return string.Empty;
+      }
+      foreach (string escapeCharacter in GetEscapeCharacterSet())
+      {
+        phrase = phrase.Replace(escapeCharacter, " ");
+      }
+      if (string.IsNullOrWhiteSpace(phrase))
+      {
+        phrase = string.Empty;
+      }
+      return phrase;
     }
 
-    protected virtual IEnumerable<SearchStringModel> ResolveSearchQueryTokens(Item contextItem, IEnumerable<SearchStringModel> models)
+    protected virtual HashSet<string> GetEscapeCharacterSet()
     {
-      var resolver = ServiceLocator.ServiceProvider.GetService<ISearchQueryTokenResolver>();
-      var searchStringModels = models.ToList();
-      return resolver.Resolve(searchStringModels, contextItem);
+      return new HashSet<string> { "+", "-", "&", "|", "!", "{", "}", "[", "]", "^", "(", ")", "~", ":", ";", ",", "/", @"\", "?", @"""" };
     }
+    #endregion
 
-    protected virtual IQueryable<ContentPage> GetQuery(string query, string scope, string language, Coordinates center, string site, string itemid)
+
+    protected virtual IQueryable<ContentPage> GetQuery(string query, string scope, string language, Coordinates center, string siteName)
     {
       string indexName;
-      return GetQuery(query, scope, language, center, site, itemid, out indexName);
+      return GetQuery(query, scope, language, center, siteName, out indexName);
     }
 
     protected virtual Expression<Func<ContentPage, bool>> PageOrMediaPredicate(string siteName)
@@ -126,7 +130,9 @@
       var settingsItem = MultisiteContext.GetSettingsItem(homeItem);
       if (settingsItem != null)
       {
+        #region MODIFIED FOR PATCH 257237.313772 Full name of _SearchCriteria for resolution
         MultilistField associatedContent = settingsItem.Fields[Sitecore.XA.Foundation.Search.Templates._SearchCriteria.Fields.AssociatedContent];
+        #endregion
         if (associatedContent != null)
         {
           foreach (var id in associatedContent.TargetIDs.Select(i => i.ToSearchID()))
@@ -134,8 +140,9 @@
             predicate = predicate.Or(i => i.RawPath == id && i.IsSearchable);
           }
         }
-
+        #region MODIFIED FOR PATCH 257237.313772 Full name of _SearchCriteria for resolution
         MultilistField associatedMedia = settingsItem.Fields[Sitecore.XA.Foundation.Search.Templates._SearchCriteria.Fields.AssociatedMedia];
+        #endregion
         if (associatedMedia != null)
         {
           foreach (var shortId in associatedMedia.GetItems().Select(i => i.ID.ToSearchID()))
@@ -162,7 +169,9 @@
       var settingsItem = MultisiteContext.GetSettingsItem(homeItem);
       if (settingsItem != null)
       {
+        #region MODIFIED FOR PATCH 257237.313772 Full name of _SearchCriteria for resolution
         MultilistField associatedContent = settingsItem.Fields[Sitecore.XA.Foundation.Search.Templates._SearchCriteria.Fields.AssociatedContent];
+        #endregion
         if (associatedContent != null)
         {
           foreach (var id in associatedContent.TargetIDs.Select(i => i.ToSearchID()))
@@ -199,7 +208,11 @@
 
     protected virtual Expression<Func<ContentPage, bool>> LanguagePredicate(string language)
     {
-      IEnumerable<string> languages = language.ParseLanguages().Select(l => l.Name).ToList();
+      IEnumerable<string> languages = (language ?? string.Empty).Split(',', '|')
+          .Where(s => !string.IsNullOrWhiteSpace(s))
+          .Select(LanguageManager.GetLanguage)
+          .Where(l => l != null).Select(l => l.Name)
+          .ToList();
 
       if (!languages.Any())
       {
@@ -209,16 +222,6 @@
       Expression<Func<ContentPage, bool>> predicate = PredicateBuilder.False<ContentPage>();
       predicate = languages.Aggregate(predicate, (p, l) => p.Or(i => i.Language == l));
       return predicate;
-    }
-
-    protected virtual Item GetContextItem(string itemId)
-    {
-      Item contextItem = null;
-      if (ID.IsID(itemId))
-      {
-        contextItem = Context.Database.GetItem(new ID(itemId));
-      }
-      return contextItem;
     }
   }
 }
